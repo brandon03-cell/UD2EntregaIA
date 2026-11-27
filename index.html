@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Traductor con Transformers.js</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; }
+    textarea, #output { width: 100%; min-height: 100px; padding: 8px; margin: 10px 0; box-sizing: border-box; }
+    #output { border: 1px solid #ccc; background: #f4f4f4; }
+    button { padding: 8px 16px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Traductor en el navegador</h1>
+  <p>Dispositivo: <b id="device"></b></p>
+
+  <button id="swapBtn">Inglés a español</button>
+  <textarea id="inputText" placeholder="Escribe el texto a traducir..."></textarea>
+  <button id="translateBtn">Traducir</button>
+
+  <p id="status"></p>
+  <h3>Resultado:</h3>
+  <div id="output"></div>
+
+  <script type="module">
+    // Importamos Transformers.js desde CDN (jsDelivr)
+    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
+
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    const deviceEl = document.getElementById('device');
+    const translateBtn = document.getElementById('translateBtn');
+    const swapBtn = document.getElementById('swapBtn');
+
+    // Un modelo para cada dirección
+    const modelos = {
+      'en-es': 'Xenova/opus-mt-en-es',
+      'es-en': 'Xenova/opus-mt-es-en'
+    };
+    let direccion = 'en-es';
+    const traductores = {}; // aquí se guardan los modelos ya cargados
+
+    // Comprobamos si el navegador soporta aceleración por hardware con WebGPU
+    let device = 'gpu' in navigator ? 'webgpu' : 'wasm';
+    deviceEl.innerText = device;
+
+    // Muestra el porcentaje de descarga del modelo
+    function mostrarProgreso(p) {
+      if (p.status === 'progress') {
+        statusEl.innerText = `Cargando modelo... ${Math.round(p.progress)}%`;
+      }
+    }
+
+    // Carga el modelo de la dirección actual
+    async function cargarModelo() {
+      if (traductores[direccion]) return; // ya estaba cargado
+
+      translateBtn.disabled = true;
+      statusEl.innerText = 'Cargando modelo...';
+      try {
+        traductores[direccion] = await pipeline('translation', modelos[direccion], {
+          device: device,
+          progress_callback: mostrarProgreso
+        });
+      } catch (error) {
+        // Plan de rescate: si WebGPU falla, usamos WebAssembly
+        console.warn('WebGPU no disponible, usando WASM', error);
+        device = 'wasm';
+        deviceEl.innerText = device;
+        traductores[direccion] = await pipeline('translation', modelos[direccion], {
+          device: 'wasm',
+          progress_callback: mostrarProgreso
+        });
+      }
+      statusEl.innerText = 'Modelo listo para usar.';
+      translateBtn.disabled = false;
+    }
+
+    // Ejecuta la traducción en el cliente
+    async function translateText() {
+      const text = document.getElementById('inputText').value;
+      if (!text) return;
+
+      translateBtn.disabled = true;
+      statusEl.innerText = 'Traduciendo...';
+      try {
+        const result = await traductores[direccion](text);
+        // El resultado viene en un array de objetos: [{ translation_text: "..." }]
+        outputEl.innerText = result[0].translation_text;
+        statusEl.innerText = '¡Hecho!';
+      } catch (error) {
+        console.error(error);
+        statusEl.innerText = 'Error al traducir.';
+      }
+      translateBtn.disabled = false;
+    }
+
+    // Cambia entre inglés-español y español-inglés
+    async function cambiarDireccion() {
+      if (direccion === 'en-es') {
+        direccion = 'es-en';
+        swapBtn.innerText = 'Español a inglés';
+      } else {
+        direccion = 'en-es';
+        swapBtn.innerText = 'Inglés a español';
+      }
+      outputEl.innerText = '';
+      await cargarModelo();
+    }
+
+    translateBtn.addEventListener('click', translateText);
+    swapBtn.addEventListener('click', cambiarDireccion);
+
+    // Cargar el modelo al iniciar
+    cargarModelo();
+  </script>
+</body>
+</html>
